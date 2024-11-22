@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=hello_django
+      - POSTGRES_PASSWORD=hello_django
+      - POSTGRES_DB=hello_django_dev
+  db_admin:
+    image: dpage/pgadmin4
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=pudovninmihail@gmail.com
+      - POSTGRES_USER=hello_django
+      - PGADMIN_DEFAULT_PASSWORD=hello_django
+      - POSTGRES_DB=hello_django_dev
+    ports:
+      - 5432:80
+
+volumes:
+  postgres_data:
