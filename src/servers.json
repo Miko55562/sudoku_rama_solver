@@ -1,0 +1,13 @@
+{
+    "Servers": {
+        "1": {
+            "Name": "pgdb",
+            "Group": "Server Group 1",
+            "Port": 5432,
+            "Username": "hello_django",
+            "Host": "pgdb",
+            "SSLMode": "prefer",
+            "MaintenanceDB": "postgres"
+        }
+    }
+}

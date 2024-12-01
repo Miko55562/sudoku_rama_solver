@@ -1,5 +1,5 @@
 services:
-  db:
+  pgdb:
     image: postgres:15
     volumes:
       - postgres_data:/var/lib/postgresql/data/
@@ -7,15 +7,30 @@ services:
       - POSTGRES_USER=hello_django
       - POSTGRES_PASSWORD=hello_django
       - POSTGRES_DB=hello_django_dev
-  db_admin:
+  pgdb_admin:
     image: dpage/pgadmin4
     environment:
       - PGADMIN_DEFAULT_EMAIL=pudovninmihail@gmail.com
       - POSTGRES_USER=hello_django
       - PGADMIN_DEFAULT_PASSWORD=hello_django
       - POSTGRES_DB=hello_django_dev
+    volumes:
+      - ./servers.json:/pgadmin4/servers.json
     ports:
       - 5432:80
+  sudoku_solver:
+    build: .
+    depends_on:
+      - pgdb
+    environment:
+      - DB_HOST=pgdb
+      - DB_PORT=5432
+      - DB_USER=hello_django
+      - DB_PASSWORD=hello_django
+      - DB_NAME=sudoku
+    volumes:
+      - .:/app
+    # command: ./sudoku_solver
 
 volumes:
   postgres_data:

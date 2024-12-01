@@ -114,30 +114,89 @@ void printSudoku(const std::vector<std::vector<int>>& grid,
 }
 
 
+// Функция для преобразования строки в вектор
+template <typename T>
+std::vector<T> parseCSV(const std::string& str) {
+    std::vector<T> result;
+    std::stringstream ss(str);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        result.push_back(std::stoi(item)); // Для числовых данных
+    }
+    return result;
+}
+
+// Функция для извлечения задачи из базы данных
+std::tuple<std::vector<std::vector<int>>, std::vector<int>, std::vector<int>, std::vector<int>, std::vector<int>> getSudokuTaskFromDB(pqxx::connection& conn) {
+    pqxx::work txn(conn);
+    pqxx::result res = txn.exec("SELECT puzzle, top_sums, bottom_sums, left_sums, right_sums FROM sudoku_tasks WHERE status = 'pending' LIMIT 1");
+
+    if (res.empty()) {
+        throw std::runtime_error("No pending Sudoku tasks found.");
+    }
+
+    std::string puzzle = res[0][0].as<std::string>();
+    std::string top_sums = res[0][1].as<std::string>();
+    std::string bottom_sums = res[0][2].as<std::string>();
+    std::string left_sums = res[0][3].as<std::string>();
+    std::string right_sums = res[0][4].as<std::string>();
+
+    // Преобразование строк в векторы
+    std::vector<std::vector<int>> grid(SIZE, std::vector<int>(SIZE, 0));
+    int index = 0;
+    for (int i = 0; i < SIZE; ++i) {
+        for (int j = 0; j < SIZE; ++j) {
+            grid[i][j] = puzzle[index++] - '0';
+        }
+    }
+
+    // Преобразование сумм
+    std::vector<int> topSums = parseCSV<int>(top_sums);
+    std::vector<int> bottomSums = parseCSV<int>(bottom_sums);
+    std::vector<int> leftSums = parseCSV<int>(left_sums);
+    std::vector<int> rightSums = parseCSV<int>(right_sums);
+
+    return {grid, topSums, bottomSums, leftSums, rightSums};
+}
+
+// Функция для обновления статуса задачи в базе данных
+void updateSudokuTaskStatus(pqxx::connection& conn, int task_id, const std::string& status, const std::string& solution = "") {
+    pqxx::work txn(conn);
+    std::string query = "UPDATE sudoku_tasks SET status = '" + txn.quote(status) + "', solution = " + txn.quote(solution) +
+                        " WHERE id = " + std::to_string(task_id);
+    txn.exec(query);
+    txn.commit();
+}
+
 int main() {
-    // Пример решетки судоку
-    std::vector<std::vector<int>> sudokuGrid = {
-        {0, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 7, 0, 3, 0, 0, 0, 0, 0},
-        {1, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 0, 0, 0, 0, 0, 0, 0, 0}
-    };
+    try {
+        // Подключение к базе данных PostgreSQL
+        pqxx::connection conn("dbname=sudoku user=postgres password=yourpassword host=localhost port=5432");
 
-    // Боковые суммы для первых и последних трех ячеек
-    std::vector<int> topSums = {14, 15, 16, 13, 20, 12, 13, 13, 19};    // Верхние суммы столбцов
-    std::vector<int> bottomSums = {16, 22, 7, 19, 8, 18, 20, 14, 11}; // Нижние суммы столбцов
-    std::vector<int> leftSums = {14, 16, 15, 12, 14, 19, 16, 20, 9};   // Левые суммы строк
-    std::vector<int> rightSums = {17, 9, 19, 13, 12, 20, 14, 8, 23};  // Правые суммы строк
+        // Получаем задачу из базы данных
+        auto [sudokuGrid, topSums, bottomSums, leftSums, rightSums] = getSudokuTaskFromDB(conn);
 
-    if (solveSudoku(sudokuGrid, topSums, bottomSums, leftSums, rightSums)) {
-        printSudoku(sudokuGrid, topSums, bottomSums, leftSums, rightSums );
-    } else {
-        std::cout << "No solution exists!" << std::endl;
+        // Решаем судоку
+        if (solveSudoku(sudokuGrid, topSums, bottomSums, leftSums, rightSums)) {
+            printSudoku(sudokuGrid, topSums, bottomSums, leftSums, rightSums);
+            
+            // Преобразуем решение в строку
+            std::string solution = "";
+            for (const auto& row : sudokuGrid) {
+                for (int num : row) {
+                    solution += std::to_string(num);
+                }
+            }
+
+            // Обновляем статус задачи в базе данных
+            updateSudokuTaskStatus(conn, 1, "solved", solution);  // Пример с id = 1
+        } else {
+            std::cout << "No solution exists!" << std::endl;
+            updateSudokuTaskStatus(conn, 1, "failed");  // Пример с id = 1
+        }
+
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
     }
 
     return 0;
