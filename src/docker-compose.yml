@@ -7,6 +7,8 @@ services:
       - POSTGRES_USER=hello_django
       - POSTGRES_PASSWORD=hello_django
       - POSTGRES_DB=hello_django_dev
+    ports:
+      - 5432:5432
   pgdb_admin:
     image: dpage/pgadmin4
     environment:
@@ -16,8 +18,8 @@ services:
       - POSTGRES_DB=hello_django_dev
     volumes:
       - ./servers.json:/pgadmin4/servers.json
-    ports:
-      - 5432:80
+    # ports:
+    #   - 5432:80
   sudoku_solver:
     build: .
     depends_on:

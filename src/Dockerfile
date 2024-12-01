@@ -17,6 +17,6 @@ COPY . ./
 RUN g++ -o sudoku_solver main.cpp -lpqxx -lpq
 
 # Запуск программы
-CMD ["./sudoku_solver"]
+CMD g++ -o sudoku_solver main.cpp -lpqxx -lpq && ./sudoku_solver
 
 # ENTRYPOINT [ "./sudoku_solver" ]
