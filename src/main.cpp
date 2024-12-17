@@ -3,25 +3,62 @@
 #include <tuple>
 #include <sstream>
 #include <pqxx/pqxx>
+#include <crow.h>
 
 const int SIZE = 9;  // Размер судоку
+
+std::string cleanInput(const std::string& str) {
+    std::string result = str;
+
+    // Удаляем все '{' и '}'
+    result.erase(std::remove(result.begin(), result.end(), '{'), result.end());
+    result.erase(std::remove(result.begin(), result.end(), '}'), result.end());
+
+    // Удаляем лишние пробелы вокруг
+    result.erase(0, result.find_first_not_of(" \t"));
+    result.erase(result.find_last_not_of(" \t") + 1);
+
+    return result;
+}
 
 // Функция для преобразования строки с числами в вектор
 template <typename T>
 std::vector<T> parseCSV(const std::string& str) {
     std::vector<T> result;
-    std::stringstream ss(str);
+
+    // Создаем копию строки с очищенными символами
+    std::string cleanedStr = cleanInput(str);
+
+    std::stringstream ss(cleanedStr);
     std::string item;
+
     while (std::getline(ss, item, ',')) {
-        result.push_back(std::stoi(item));  // Для числовых данных
+        try {
+            // Удаляем пробелы у текущего элемента
+            item.erase(0, item.find_first_not_of(" \t"));
+            item.erase(item.find_last_not_of(" \t") + 1);
+
+            if constexpr (std::is_same<T, int>::value) {
+                result.push_back(std::stoi(item));  // Для чисел
+            } else if constexpr (std::is_same<T, std::string>::value) {
+                result.push_back(item);  // Для строк
+            } else {
+                throw std::invalid_argument("Unsupported type for parseCSV");
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error parsing item: '" << item << "'. Reason: " << e.what() << std::endl;
+        }
     }
+
     return result;
 }
 
+
+
 // Проверка на допустимость значения в ячейке
 bool isValid(const std::vector<std::vector<int>>& grid, int row, int col, int num,
-             const std::vector<int>& topSums, const std::vector<int>& bottomSums,
-             const std::vector<int>& leftSums, const std::vector<int>& rightSums) {
+             const std::vector<int>& top_sums, const std::vector<int>& bottom_sums,
+             const std::vector<int>& left_sums, const std::vector<int>& right_sums) {
     for (int i = 0; i < SIZE; ++i) {
         if (grid[row][i] == num || grid[i][col] == num) return false;
     }
@@ -38,15 +75,16 @@ bool isValid(const std::vector<std::vector<int>>& grid, int row, int col, int nu
 
 // Решение судоку методом backtracking
 bool solveSudoku(std::vector<std::vector<int>>& grid,
-                 const std::vector<int>& topSums, const std::vector<int>& bottomSums,
-                 const std::vector<int>& leftSums, const std::vector<int>& rightSums) {
+                 const std::vector<int>& top_sums, const std::vector<int>& bottom_sums,
+                 const std::vector<int>& left_sums, const std::vector<int>& right_sums) {
     for (int row = 0; row < SIZE; ++row) {
         for (int col = 0; col < SIZE; ++col) {
             if (grid[row][col] == 0) {
                 for (int num = 1; num <= 9; ++num) {
-                    if (isValid(grid, row, col, num, topSums, bottomSums, leftSums, rightSums)) {
+                    // std::cout << num;
+                    if (isValid(grid, row, col, num, top_sums, bottom_sums, left_sums, right_sums)) {
                         grid[row][col] = num;
-                        if (solveSudoku(grid, topSums, bottomSums, leftSums, rightSums)) return true;
+                        if (solveSudoku(grid, top_sums, bottom_sums, left_sums, right_sums)) return true;
                         grid[row][col] = 0;
                     }
                 }
@@ -68,30 +106,37 @@ void printSudoku(const std::vector<std::vector<int>>& grid) {
 }
 
 // Извлечение задачи судоку из базы данных
-std::tuple<std::vector<std::vector<int>>, std::vector<int>, std::vector<int>, std::vector<int>, std::vector<int>> getSudokuTaskFromDB(pqxx::connection& conn) {
+std::tuple<int, std::vector<std::vector<int>>, std::vector<int>, std::vector<int>, std::vector<int>, std::vector<int>> getSudokuTaskFromDB(pqxx::connection& conn) {
     pqxx::work txn(conn);
-    pqxx::result res = txn.exec("SELECT id, puzzle_grid, top_sums, bottom_sums, left_sums, right_sums FROM sudoku_puzzles WHERE status = 'pending' LIMIT 1");
+    pqxx::result res = txn.exec("SELECT id, puzzle_grid, top_sums, bottom_sums, left_sums, right_sums FROM sudoku_puzzles WHERE status = 'unsolved' LIMIT 1");
 
     if (res.empty()) {
         throw std::runtime_error("No pending Sudoku tasks found.");
     }
-
     int task_id = res[0][0].as<int>();
     std::string puzzle = res[0][1].as<std::string>();
-    std::vector<int> topSums = parseCSV<int>(res[0][2].as<std::string>());
-    std::vector<int> bottomSums = parseCSV<int>(res[0][3].as<std::string>());
-    std::vector<int> leftSums = parseCSV<int>(res[0][4].as<std::string>());
-    std::vector<int> rightSums = parseCSV<int>(res[0][5].as<std::string>());
+    std::vector<int> top_sums = parseCSV<int>(res[0][2].as<std::string>());
+    std::vector<int> bottom_sums = parseCSV<int>(res[0][3].as<std::string>());
+    std::vector<int> left_sums = parseCSV<int>(res[0][4].as<std::string>());
+    std::vector<int> right_sums = parseCSV<int>(res[0][5].as<std::string>());
 
     // Преобразование строки в матрицу 9x9
     std::vector<std::vector<int>> grid(SIZE, std::vector<int>(SIZE, 0));
-    for (int i = 0; i < SIZE; ++i) {
-        for (int j = 0; j < SIZE; ++j) {
-            grid[i][j] = puzzle[i * SIZE + j] - '0';
+    
+    std::istringstream iss(puzzle);
+    // Убираем внешние квадратные скобки
+    int num;
+    int row, col = 0;
+    while (iss >> num) {
+        grid[row][col] = num;
+        col++;
+        if (col == SIZE) {  // Переходим на следующую строку
+            col = 0;
+            row++;
         }
     }
 
-    return {grid, topSums, bottomSums, leftSums, rightSums};
+    return {task_id, grid, top_sums, bottom_sums, left_sums, right_sums};
 }
 
 // Обновление статуса задачи судоку
@@ -103,34 +148,107 @@ void updateSudokuTaskStatus(pqxx::connection& conn, int task_id, const std::stri
     txn.commit();
 }
 
-int main() {
-    try {
-        pqxx::connection conn("dbname=postgres user=hello_django password=hello_django host=pgdb port=5432");
+void createTable(pqxx::connection &conn) {
+    std::string create_table_query = R"(
+        CREATE TABLE IF NOT EXISTS sudoku_puzzles (
+            id SERIAL PRIMARY KEY,
+            puzzle_grid TEXT NOT NULL,
+            top_sums INTEGER[] NOT NULL,
+            bottom_sums INTEGER[] NOT NULL,
+            left_sums INTEGER[] NOT NULL,
+            right_sums INTEGER[] NOT NULL,
+            status VARCHAR(50) DEFAULT 'unsolved'
+        );
+    )";
 
-        // Получаем задачу
-        auto [sudokuGrid, topSums, bottomSums, leftSums, rightSums] = getSudokuTaskFromDB(conn);
+    pqxx::work txn(conn);
+    txn.exec(create_table_query);
+    txn.commit();
+    std::cout << "Table 'sudoku_puzzles' created successfully (if not existed)." << std::endl;
+}
 
-        // Решаем судоку
-        if (solveSudoku(sudokuGrid, topSums, bottomSums, leftSums, rightSums)) {
-            printSudoku(sudokuGrid);
+void insertData(pqxx::connection &conn) {
+    std::string insert_data_query = R"(
+        INSERT INTO sudoku_puzzles (puzzle_grid, top_sums, bottom_sums, left_sums, right_sums, status)
+        VALUES (
+            '0 0 0 0 0 0 0 0 0 0 7 0 3 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+            '{14,15,16,13,20,12,13,13,19}',
+            '{16,22,7,19,8,18,20,14,11}',
+            '{14,16,15,12,14,19,16,20,9}',
+            '{17,9,19,13,12,20,14,8,23}',
+            'unsolved'
+        );
+    )";
 
-            std::string solution;
-            for (const auto& row : sudokuGrid) {
-                for (int num : row) {
-                    solution += std::to_string(num);
-                }
-            }
-            std::cout << "solved";
-            updateSudokuTaskStatus(conn, 1, "solved", solution);
-        } else {
-            std::cout << "No solution exists!" << std::endl;
-            std::cout << "failed";
-            updateSudokuTaskStatus(conn, 1, "failed");
+    pqxx::work txn(conn);
+    txn.exec(insert_data_query);
+    txn.commit();
+    std::cout << "Data inserted successfully." << std::endl;
+}
+
+std::string puzzleToString(const std::vector<std::vector<int>>& puzzle) {
+    std::string result;
+    for (const auto& row : puzzle) {
+        for (int val : row) {
+            result += std::to_string(val) + " ";
         }
-
-    } catch (const std::exception& e) {
-        std::cerr << e.what() << std::endl;
+        result += "\n"; // Add newline after each row
     }
+    return result;
+}
 
-    return 0;
+// Создание веб-сервера и вывод решения на страницу
+int main() {
+    pqxx::connection conn("dbname=postgres user=hello_django password=hello_django host=pgdb port=5432");
+
+    // createTable(conn);
+    insertData(conn);
+    
+    // Получаем задачу
+
+    
+
+    // Создаем приложение Crow
+    crow::SimpleApp app;
+
+
+
+
+    // Обрабатываем корневой запрос, чтобы возвращать index.html
+    CROW_ROUTE(app, "/")([](){
+        auto page = crow::mustache::load_text("index.html");
+        return page;
+    });
+
+    // Запускаем сервер
+    app.loglevel(crow::LogLevel::DEBUG);
+    app.port(8080).multithreaded().run();
+    // Обрабатываем POST запрос с JSON
+    // CROW_ROUTE(app, "/")
+    // ([&conn] {
+
+    //     auto [id, puzzle_grid, top_sums, bottom_sums, left_sums, right_sums] = getSudokuTaskFromDB(conn);
+    //         printSudoku(puzzle_grid);
+        
+    //     // if (solveSudoku(puzzle_grid, top_sums, bottom_sums, left_sums, right_sums)) {
+    //     //     // printSudoku(puzzle_grid);
+
+    //     //     std::string solution = puzzleToString(puzzle_grid); // Convert grid to string
+    //     //     updateSudokuTaskStatus(conn, id, "solved", solution); // Pass the string to the function
+    //     // }
+    //     Json::Value result;
+    //     for (int i = 0; i < 9; ++i) {
+    //         Json::Value row;
+    //         for (int j = 0; j < 9; ++j) {
+    //             row.append(puzzle_grid[i][j]);
+    //         }
+    //         result["puzzle_grid"].append(row);
+    //     }
+    //     return crow::response(result.toStyledString());
+    // });
+
+
+    // Запускаем сервер Crow
+    app.loglevel(crow::LogLevel::DEBUG);
+    app.port(8080).multithreaded().run();
 }
