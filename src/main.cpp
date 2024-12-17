@@ -6,6 +6,7 @@
 #include <crow.h>
 
 const int SIZE = 9;  // Размер судоку
+std::vector<std::vector<int>> TABLE;
 
 std::string cleanInput(const std::string& str) {
     std::string result = str;
@@ -79,6 +80,11 @@ bool solveSudoku(std::vector<std::vector<int>>& grid,
                  const std::vector<int>& left_sums, const std::vector<int>& right_sums) {
     for (int row = 0; row < SIZE; ++row) {
         for (int col = 0; col < SIZE; ++col) {
+            TABLE[row][col] = 0;
+        }
+    }
+    for (int row = 0; row < SIZE; ++row) {
+        for (int col = 0; col < SIZE; ++col) {
             if (grid[row][col] == 0) {
                 for (int num = 1; num <= 9; ++num) {
                     // std::cout << num;
@@ -87,6 +93,7 @@ bool solveSudoku(std::vector<std::vector<int>>& grid,
                         if (solveSudoku(grid, top_sums, bottom_sums, left_sums, right_sums)) return true;
                         grid[row][col] = 0;
                     }
+                    TABLE[row][col] = grid[row][col];
                 }
                 return false;
             }
@@ -197,58 +204,51 @@ std::string puzzleToString(const std::vector<std::vector<int>>& puzzle) {
     return result;
 }
 
-// Создание веб-сервера и вывод решения на страницу
+std::string generateJsonTable(const std::vector<std::vector<int>>& table) {
+    std::ostringstream json;
+    json << "[";
+
+    for (size_t i = 0; i < table.size(); ++i) {
+        json << "[";
+        for (size_t j = 0; j < table[i].size(); ++j) {
+            json << table[i][j];
+            if (j < table[i].size() - 1) {
+                json << ",";
+            }
+        }
+        json << "]";
+        if (i < table.size() - 1) {
+            json << ",";
+        }
+    }
+
+    json << "]";
+    return json.str();
+}
+
+
 int main() {
     pqxx::connection conn("dbname=postgres user=hello_django password=hello_django host=pgdb port=5432");
 
     // createTable(conn);
     insertData(conn);
-    
-    // Получаем задачу
 
-    
-
-    // Создаем приложение Crow
     crow::SimpleApp app;
 
+    CROW_ROUTE(app, "/get_sudoku")
+        .methods("GET"_method)
+        ([]{
+            auto page = generateJsonTable(TABLE);
+            return page;
+        });
 
-
-
-    // Обрабатываем корневой запрос, чтобы возвращать index.html
-    CROW_ROUTE(app, "/")([](){
+    CROW_ROUTE(app, "/")([&conn](){
         auto page = crow::mustache::load_text("index.html");
+        auto [id, puzzle_grid, top_sums, bottom_sums, left_sums, right_sums] = getSudokuTaskFromDB(conn);
+        solveSudoku(puzzle_grid, top_sums, bottom_sums, left_sums, right_sums);
         return page;
     });
 
-    // Запускаем сервер
-    app.loglevel(crow::LogLevel::DEBUG);
-    app.port(8080).multithreaded().run();
-    // Обрабатываем POST запрос с JSON
-    // CROW_ROUTE(app, "/")
-    // ([&conn] {
-
-    //     auto [id, puzzle_grid, top_sums, bottom_sums, left_sums, right_sums] = getSudokuTaskFromDB(conn);
-    //         printSudoku(puzzle_grid);
-        
-    //     // if (solveSudoku(puzzle_grid, top_sums, bottom_sums, left_sums, right_sums)) {
-    //     //     // printSudoku(puzzle_grid);
-
-    //     //     std::string solution = puzzleToString(puzzle_grid); // Convert grid to string
-    //     //     updateSudokuTaskStatus(conn, id, "solved", solution); // Pass the string to the function
-    //     // }
-    //     Json::Value result;
-    //     for (int i = 0; i < 9; ++i) {
-    //         Json::Value row;
-    //         for (int j = 0; j < 9; ++j) {
-    //             row.append(puzzle_grid[i][j]);
-    //         }
-    //         result["puzzle_grid"].append(row);
-    //     }
-    //     return crow::response(result.toStyledString());
-    // });
-
-
-    // Запускаем сервер Crow
     app.loglevel(crow::LogLevel::DEBUG);
     app.port(8080).multithreaded().run();
 }
